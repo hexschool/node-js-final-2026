@@ -1,6 +1,22 @@
 const { dataSource } = require("../db/data-source");
 const appError = require("../utils/appError");
 const { isInteger, isValidString } = require("../utils/validUtils");
+const { Between, In, IsNull } = require("typeorm");
+
+const MONTH_NAMES = [
+      "january",
+      "february",
+      "march", 
+      "april",
+      "may", 
+      "june",
+      "july",
+      "august", 
+      "september", 
+      "october", 
+      "november", 
+      "december",
+    ];
 
 const adminCoachesController = {
   async createCoach(req, res, next) {
@@ -129,8 +145,59 @@ const adminCoachesController = {
   },
 
   async getRevenue(req, res, next) {
+    console.log('🔥🔥🔥 GET REVENUE HIT 🔥🔥🔥');
+    try {
+    const { month } = req.query;
+    const monthIndex = MONTH_NAMES.indexOf(String(month || "").toLowerCase());
+    if (monthIndex === -1) {
+      return next(appError(400, "欄位未填寫正確"));
+    }
 
+    const year = new Date().getFullYear();
+    const startAt = new Date(year, monthIndex, 1, 0, 0, 0, 0);
+    const endAt = new Date(year, monthIndex + 1, 0, 23, 59, 59, 999);
+
+    const courseRepo = dataSource.getRepository("Course");
+    const courses = await courseRepo.find({ where: { user_id: req.user.id } });
+    const courseIds = courses.map((c) => c.id);
+
+    let bookingCount = 0;
+    if (courseIds.length > 0) {
+      const bookingRepo = dataSource.getRepository("CourseBooking");
+      bookingCount = await bookingRepo.count({
+        where: {
+          course_id: In(courseIds),
+          cancelled_at: IsNull(),
+          created_at: Between(startAt, endAt),
+        },
+      });
+    }
+
+    const packageRepo = dataSource.getRepository("CreditPackage");
+    const packages = await packageRepo.find();
+    const totalPrice = packages.reduce((sum, p) => sum + Number(p.price), 0);
+    const totalCredits = packages.reduce((sum, p) => sum + Number(p.credit_amount), 0);
+    const perCreditPrice = totalCredits > 0 ? totalPrice / totalCredits : 0;
+
+    const revenue = Math.floor(bookingCount * perCreditPrice);
+
+    res.json({
+      status: "success",
+      data: {
+        total: {
+          revenue,
+          participants: bookingCount,
+          course_count: bookingCount,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+    
+  
+    
   },
 };
 
-module.exports = adminCoachesController;
+module.exports = adminCoachesController;  
